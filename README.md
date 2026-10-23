@@ -1,3 +1,6 @@
+### Arquivo Google Colab:
+<a href="https://colab.research.google.com/drive/1gG44SwYw25DKrgZ9rJqlwygJuzvjLNv1?usp=sharing">los_reflection_difraction.ipynb</a>
+
 # Procedimentos
 
 ## 1. Instalação, importações e configuração do refletor simples
@@ -207,73 +210,115 @@ Essa implementação pressupõe que os dados possam ser organizados em vetores c
 
 Depois de concluir a configuração inicial do refletor simples, comecei a segunda parte do laboratório, voltada ao estudo da difração em uma aresta.
 
-Na primeira tentativa, encontrei um erro de arquivo não encontrado ao carregar `simple_wedge.xml`. Para resolver o problema, adaptei o código para baixar o arquivo de exemplo do repositório oficial do Sionna caso ele ainda não estivesse disponível no ambiente.
+Na primeira tentativa, encontrei erros de arquivo não encontrado (FileNotFoundError) ao tentar carregar o arquivo XML externamente via download ou clonagem. Para resolver o problema de forma mais simples e robusta, utilizei diretamente a cena embutida fornecida pelo próprio pacote do Sionna (sionna.rt.scene.simple_wedge).
 
 ```python
-import os
+# TODO: carregar simple_wedge e definir a frequência
 from sionna.rt import load_scene
+import sionna
 
-if not os.path.exists("simple_wedge.xml"):
-    !wget -q https://raw.githubusercontent.com/NVlabs/sionna/main/examples/rt/simple_wedge.xml
-
-scene_w = load_scene("simple_wedge.xml")
+scene_w = load_scene(sionna.rt.scene.simple_wedge)
 scene_w.frequency = 1e9
 ```
 
-Utilizei `os.path.exists()` para verificar se o arquivo já estava presente no diretório de trabalho. Caso não estivesse, o comando `wget` tentaria baixá-lo do repositório do Sionna.
-
-Em seguida, utilizei `load_scene()` para carregar a geometria da cunha e configurei a frequência de operação em 1 GHz.
-
-Essa etapa ainda precisa ser validada pela execução da célula. A verificação de existência não garante que o download tenha sido concluído com sucesso, e o arquivo precisa ser compatível com a versão instalada do Sionna.
-
-## 6. Células a serem preenchidas
-
-### 6.1. Configuração da cena de difração
-
-Preciso confirmar que a cena `simple_wedge` foi carregada corretamente e verificar suas propriedades geométricas e físicas.
-
-### 6.2. Configuração dos materiais da cunha
-
-Preciso configurar as propriedades eletromagnéticas necessárias ao experimento, verificando os parâmetros exigidos pelo modelo de difração utilizado.
-
-### 6.3. Configuração dos arrays e do transmissor
-
-Preciso definir os arrays de antenas, configurar a polarização e posicionar o transmissor em relação à aresta da cunha.
-
-### 6.4. Distribuição dos receptores em arco
-
-Preciso gerar as posições dos receptores ao redor da aresta utilizando `np.linspace()` e converter os ângulos em coordenadas cartesianas.
-
-A estrutura inicial será:
-
 ```python
-angles = np.linspace(theta_start, theta_end, num_receivers)
+# TODO: configurar antenas, material da cunha e transmissor
+antenna_array = PlanarArray(
+    num_rows=1,
+    num_cols=1,
+    vertical_spacing=0.5,
+    horizontal_spacing=0.5,
+    pattern="iso",
+    polarization="V"
+)
+
+scene_w.tx_array = antenna_array
+scene_w.rx_array = antenna_array
+
+tx = Transmitter(name="tx", position=[-10, 0, 0])
+scene_w.add(tx)
 ```
 
-Para calcular as coordenadas, utilizarei:
+```python
+# TODO: criar apenas um ou uma distribuição de receptores ao longo de um arco em torno da cunha
+import numpy as np
+from sionna.rt import Receiver
 
-\[
-x = x_c + r\cos(\theta)
-\]
+radius = 15.0
+angles = np.linspace(-np.pi/3, np.pi/3, 10)
 
-\[
-y = y_c + r\sin(\theta)
-\]
+# Observação: foi necessário converter as coordenadas para float padrão do Python 
+# para evitar erros de tipo (TypeError) do Mitsuba com arrays float64 do NumPy.
+for i, theta in enumerate(angles):
+    x = float(radius * np.cos(theta))
+    y = float(radius * np.sin(theta))
+    z = 0.0
+    rx = Receiver(name=f"rx_{i}", position=[x, y, z])
+    scene_w.add(rx)
+```
 
-Nessas expressões, `x_c` e `y_c` representam o centro do arco, `r` é o raio e `theta` corresponde ao ângulo de cada receptor.
+```python
+# TODO: defina uma posição para a câmera e renderize a cena
+from sionna.rt import Camera
 
-### 6.5. Renderização da cena completa
+cam = Camera(position=[0, 0, 40], look_at=[0, 0, 0])
+scene_w.render(camera=cam)
+```
 
-Preciso renderizar a cunha com o transmissor e os receptores posicionados, ajustando a câmera para verificar se a geometria está correta.
+Utilizei a câmera posicionada em [0, 0, 40] olhando para o centro para renderizar o ambiente, visualizando o transmissor e a distribuição dos receptores em arco ao redor da cunha.
 
-### 6.6. Cálculo dos caminhos com difração
+## 6. Cálculo dos caminhos com difração
 
-Preciso configurar o `PathSolver` para incluir a difração e, quando necessário, os caminhos LOS e as reflexões.
+```python
+# TODO: calcular LOS + reflexão, com difração desativada
+from sionna.rt import PathSolver
 
-### 6.7. Extração das CIRs
+path_solver = PathSolver()
+paths_without_diffraction = path_solver(scene_w, max_depth=1, diffraction=False)
+```
 
-Preciso extrair os coeficientes complexos e os atrasos de propagação para os receptores distribuídos ao longo do arco, verificando as dimensões dos dados retornados.
+```python
+# TODO: repetir o cálculo com difração ativada
+paths_with_diffraction = path_solver(scene_w, max_depth=1, diffraction=True)
+```
 
-### 6.8. Gráficos comparativos
+```python
+# TODO: extrair amplitudes e atrasos
+a_no_diff, tau_no_diff = paths_without_diffraction.cir()
+a_diff, tau_diff = paths_with_diffraction.cir()
+```
 
-Preciso gerar gráficos das CIRs para comparar os resultados entre os receptores e analisar a contribuição dos caminhos difratados, especialmente nas regiões de sombra geométrica.
+```python
+# TODO: escolher um receptor e comparar os caminhos desse receptor nos dois cálculos.
+rx_idx = 0
+print(f"Comparando caminhos para o receptor rx_{rx_idx}:")
+print(f"  - Sem difração (shape): {a_no_diff[rx_idx].shape}")
+print(f"  - Com difração (shape): {a_diff[rx_idx].shape}")
+```
+
+## 7. Desafios finais
+
+```python
+# Frequência: repita um cálculo em 3,5 GHz e compare atrasos e coeficientes com o caso de 1 GHz.
+scene.frequency = 3.5e9
+paths_35ghz = path_solver(scene, max_depth=1)
+a_35, tau_35 = paths_35ghz.cir()
+
+# Visualizando o CIR a 3,5 GHz
+plot_cir(a_35, tau_35)
+```
+
+```python
+# Profundidade: altere max_depth na cena simple_reflector e investigue se aparecem caminhos adicionais.
+path_solver_deep = PathSolver()
+paths_deep = path_solver_deep(scene, max_depth=2)
+
+a_deep, tau_deep = paths_deep.cir()
+plot_cir(a_deep, tau_deep)
+```
+## 8. Conclusões
+
+- LOS: Identificado pela trajetória reta e desobstruída entre o transmissor e o receptor, calculada sem interações de superfície (max_depth=0).
+- Reflexão: Aumenta o comprimento físico do percurso (formato de "V"), resultando em um atraso temporal maior em relação ao caminho direto (LOS).
+- Difração: Contribui principalmente quando o receptor está na região de sombra geométrica (atrás de obstáculos ou arestas), permitindo que a onda contorne a barreira.
+- Resposta ao impulso: Cada caminho contribui com um atraso temporal específico e uma amplitude complexa, definindo o tempo de chegada e a intensidade de cada raio no canal.
