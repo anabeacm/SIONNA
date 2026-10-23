@@ -39,7 +39,7 @@ scene = load_scene(sionna.rt.scene.simple_reflector)
 
 ```
 
-Carreguei a cena de exemplo `simple_reflector` e configurei a frequência de operação em 1 GHz, equivalente a \(10^9\) Hz.
+Carreguei a cena de exemplo `simple_reflector` e configurei a frequência de operação em 1 GHz, equivalente a 10<sup>9</sup> Hz.
 
 Em seguida, defini um array de antenas com uma única linha e uma única coluna, padrão de radiação isotrópico - _modelo ideal de antena que irradia a mesma quantidade de potência em todas as direções do espaço._ - (`"iso"`) e polarização vertical (`"V"`) - _define a orientação da polarização do campo elétrico como vertical_ -. Atribuí esse array ao transmissor e ao receptor por meio de `scene.tx_array` e `scene.rx_array`.
 
