@@ -47,10 +47,10 @@ Em seguida, defini um array de antenas com uma única linha e uma única coluna,
 
 ```python
 # TODO: definir frequência, arrays de antenas, transmissor e receptor
-# 1. Frequência de operação como 1 GHz
+# 2. Definir a frequência de operação como 1 GHz
 scene.frequency = 1e9
 
-# 2. Antena
+# 3. Configurar antena isotrópica com polarização vertical (1x1)
 antenna_array = PlanarArray(
     num_rows=1,
     num_cols=1,
@@ -63,16 +63,27 @@ antenna_array = PlanarArray(
 scene.tx_array = antenna_array
 scene.rx_array = antenna_array
 
-# 3. Adicionar transmissor e receptor
-tx = Transmitter(name="tx", position=[-5, 0, 5])
-rx = Receiver(name="rx", position=[5, 0, 5])
+# 4. Adicionar um transmissor e um receptor (posicionados para capturar LOS e reflexão no refletor)
+tx = Transmitter(name="tx", position=[-5.0, 10.0, 2.0], orientation=[0.0, 0.0, 0.0])
+rx = Receiver(name="rx", position=[5.0, 10.0, 2.0], orientation=[0.0, 0.0, 0.0])
 
 scene.add(tx)
 scene.add(rx)
 
-# 4. Renderizar
-cam = Camera(position=[0, -30, 20], look_at=[0, 0, 0])
-scene.render(camera=cam)
+tx.look_at(rx)
+
+freq_ghz = np.array(scene.frequency).item() / 1e9
+
+# 5. Inspecionar os objetos presentes na cena
+print("Objetos Geométricos na Cena:")
+for obj_name, obj in scene.objects.items():
+    mat_name = obj.radio_material.name if obj.radio_material else "Sem material"
+    print(f"Objeto: {obj_name:<20} | Material de Rádio: {mat_name}")
+
+print("\nDispositivos de Rádio e Configuração:")
+print("Transmissores adicionados:", list(scene.transmitters.keys()))
+print("Receptores adicionados:   ", list(scene.receivers.keys()))
+print(f"Frequência configurada:   {freq_ghz:.2f} GHz")
 ```
 
 Posicionei o transmissor em `[-5, 0, 5]` e o receptor em `[5, 0, 5]`, adicionando ambos à cena. Por fim, configurei a câmera e renderizei o ambiente para visualizar a geometria antes de calcular os caminhos de propagação.
@@ -93,7 +104,7 @@ paths_los = path_solver(scene, max_depth=0)
 
 ```python
 # TODO: defina uma posição para a câmera e renderize a cena
-cam = Camera(position=[0, -30, 20], look_at=[0, 0, 0])
+cam = Camera(position=[0.0, -25.0, 15.0], look_at=[0.0, 10.0, 2.0])
 scene.render(camera=cam, paths=paths_los)
 ```
 
@@ -101,22 +112,34 @@ O método `cir()` retornou os coeficientes complexos em `a_los` e os atrasos de 
 
 ```python
 # TODO: extrair a resposta ao impulso do canal (amplitudes e atrasos)
-a_los, tau_los = paths_los.cir()
+a_ref = paths_los_ref.a
+tau_ref = paths_los_ref.tau
 ```
 
 ```python
 # TODO: inspecionar os caminhos válidos e os formatos dos arrays
-if isinstance(a_los, list):
-    print("a_los é uma lista de tamanho:", len(a_los))
-    print("Shape do primeiro elemento de a_los:", a_los[0].shape)
-else:
-    print("Shape de a_los:", a_los.shape)
+a_ref_np = np.array(a_ref)
+tau_ref_np = np.array(tau_ref)
 
-if isinstance(tau_los, list):
-    print("tau_los é uma lista de tamanho:", len(tau_los))
-    print("Shape do primeiro elemento de tau_los:", tau_los[0].shape)
+if hasattr(paths_los, "mask"):
+    num_valid_los = int(np.sum(np.array(paths_los.mask)))
 else:
-    print("Shape de tau_los:", tau_los.shape)
+    num_valid_los = int(np.count_nonzero(np.array(paths_los.a)))
+
+if hasattr(paths_los_ref, "mask"):
+    num_valid_ref = int(np.sum(np.array(paths_los_ref.mask)))
+else:
+    num_valid_ref = int(np.count_nonzero(a_ref_np))
+
+print("Comparação de Caminhos Válidos:")
+print(f"Apenas LOS:              {num_valid_los} caminho(s)")
+print(f"LOS + Reflexão Especular: {num_valid_ref} caminho(s)")
+
+delays = tau_ref_np.flatten()
+print("\nAtrasos dos Caminhos (em ns):")
+for idx, delay in enumerate(delays):
+    if delay > 0:
+        print(f"Caminho {idx + 1}: {delay * 1e9:.2f} ns")
 ```
 
 ## 3. Cálculo dos caminhos com reflexão especular
@@ -128,20 +151,26 @@ Ao alterar `max_depth` para `1`, permiti que o solucionador considerasse caminho
 ```python
 # TODO: calcular os caminhos com LOS + reflexão especular
 path_solver = PathSolver()
-paths_los_ref = path_solver(scene, max_depth=1)
+paths_los_ref = path_solver(
+    scene,
+    los=True,
+    specular_reflection=True,
+    max_depth=1
+)
 ```
 
 Renderizei novamente a cena para visualizar os caminhos calculados e extraí os coeficientes complexos e os atrasos em `a_ref` e `tau_ref`.
 
 ```python
 # TODO: defina uma posição para a câmera e renderize a cena
-cam = Camera(position=[0, -30, 20], look_at=[0, 0, 0])
+cam = Camera(position=[0.0, -25.0, 15.0], look_at=[0.0, 10.0, 2.0])
 scene.render(camera=cam, paths=paths_los_ref)
 ```
 
 ```python
 # TODO: extrair amplitudes e atrasos
-a_ref, tau_ref = paths_los_ref.cir()
+a_ref = paths_los_ref.a
+tau_ref = paths_los_ref.tau
 ```
 
 Com esses resultados, posso comparar a resposta do canal nos cenários LOS e LOS com reflexão. A existência de caminhos refletidos depende da geometria e das condições da cena, portanto, essa configuração não garante que uma reflexão será encontrada.
@@ -155,39 +184,57 @@ A função recebe os coeficientes complexos e os atrasos de propagação. Primei
 Em seguida, utilizei `np.squeeze()` para remover dimensões de tamanho 1 e converti os dados multidimensionais restantes em vetores unidimensionais. A função `np.abs()` calcula a magnitude dos coeficientes complexos.
 
 ```python
-import matplotlib.pyplot as plt
-import numpy as np
-import tensorflow as tf
+# TODO: Função para visualizar a resposta ao impulso do canal (CIR)
 
-def plot_cir(amplitudes, delays):
-    # Converter para numpy se for tensor
-    a = amplitudes.numpy() if tf.is_tensor(amplitudes) else amplitudes
-    tau = delays.numpy() if tf.is_tensor(delays) else delays
+import numpy as np
+import matplotlib.pyplot as plt
+
+def plot_cir(amplitudes, delays, title="Resposta ao Impulso do Canal"):
+    """
+    Gera um gráfico de haste (stem plot) da Resposta ao Impulso do Canal (CIR).
+    """
+    a_arr = np.array(amplitudes)
+    tau_arr = np.array(delays)
+    tau_broadcast = np.broadcast_to(tau_arr, a_arr.shape)
     
-    # Se for lista, pega o primeiro elemento
-    if isinstance(a, list):
-        a = a[0]
-    if isinstance(tau, list):
-        tau = tau[0]
-        
-    # Squeezear apenas as dimensões de tamanho 1 (batch, rx, tx, etc.), mantendo os caminhos
-    a = np.squeeze(a)
-    tau = np.squeeze(tau)
+    a_flat = a_arr.flatten()
+    tau_flat = tau_broadcast.flatten()
     
-    # Se ainda tiver mais de 1 dimensão, pega a última (que corresponde aos caminhos)
-    if a.ndim > 1:
-        a = a[...].flatten() # ou pega o primeiro canal/antena se necessário
-    if tau.ndim > 1:
-        tau = tau[...].flatten()
-        
-    magnitudes = np.abs(a)
+    # 1. Filtrar caminhos válidos
+    valid_mask = np.abs(a_flat) > 0
+    a_valid = a_flat[valid_mask]
+    tau_valid = tau_flat[valid_mask]
     
-    plt.figure(figsize=(10, 4))
-    plt.stem(tau * 1e9, magnitudes)  # Atraso em nanossegundos
+    if len(a_valid) == 0:
+        print(f"[{title}] Nenhum caminho válido encontrado.")
+        return
+    
+    # 2. Converter atrasos para nanossegundos
+    delays_ns = tau_valid * 1e9
+    
+    # 3. Calcular a potência e converter para dB
+    power = np.abs(a_valid) ** 2
+    power_db = 10 * np.log10(power)
+    
+    # 4. Criar o gráfico de haste
+    plt.figure(figsize=(8, 4))
+    markerline, stemlines, baseline = plt.stem(delays_ns, power_db)
+    
+    plt.setp(markerline, color='crimson', marker='o', markersize=6)
+    plt.setp(stemlines, color='crimson', linewidth=1.5)
+    plt.setp(baseline, color='black', linewidth=0.8)
+    
     plt.xlabel("Atraso (ns)")
-    plt.ylabel("Magnitude")
-    plt.title("Resposta ao Impulso do Canal (CIR)")
-    plt.grid(True)
+    plt.ylabel("Potência (dB)")
+    plt.title(title)
+    plt.grid(True, linestyle="--", alpha=0.6)
+    
+    if len(delays_ns) == 1:
+        plt.xlim([delays_ns[0] - 10, delays_ns[0] + 10])
+    else:
+        margin = max((np.max(delays_ns) - np.min(delays_ns)) * 0.3, 5.0)
+        plt.xlim([np.min(delays_ns) - margin, np.max(delays_ns) + margin])
+        
     plt.show()
 ```
 
@@ -197,12 +244,12 @@ Por fim, executei a função para os dois casos: apenas LOS e LOS com reflexão 
 
 ```python
 # TODO: gere um gráfico para o caso apenas LOS
-plot_cir(a_los, tau_los)
+plot_cir(a_los, tau_los, title="CIR - Apenas Linha de Visada (LOS)")
 ```
 
 ```python
 # TODO: gere um gráfico para o caso LOS + reflexão especular
-plot_cir(a_ref, tau_ref)
+plot_cir(a_ref, tau_ref, title="CIR - LOS + Reflexão Especular")
 ```
 
 Essa implementação pressupõe que os dados possam ser organizados em vetores correspondentes de magnitudes e atrasos. Caso existam dimensões adicionais ou quantidades diferentes de elementos, será necessário ajustar a seleção dos dados antes da plotagem.
